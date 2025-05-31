@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "timers.h"
@@ -68,22 +69,29 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/**************** TASK HANDLERS ***********************/
-xTaskHandle Sender_HPT_Handler;
-xTaskHandle Sender_LPT_Handler;
-xTaskHandle Receiver_Handler;
-
 /**************** QUEUE HANDLER ***********************/
-xQueueHandle SimpleQueue;
+xQueueHandle St_Queue_Handler;
+
+/**************** TASK HANDLER ***********************/
+xTaskHandle Sender1_Task_Handler;
+xTaskHandle Sender2_Task_Handler;
+xTaskHandle Receiver_Task_Handler;
 
 /**************** TASK FUNCTIONS ***********************/
-void Sender_HPT_Task (void *argument);
-void Sender_LPT_Task (void *argument);
+void Sender1_Task (void *argument);
+void Sender2_Task (void *argument);
 void Receiver_Task (void *argument);
 
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
+/**************** STRUCTURE DEFINITION ***********************/
 
-uint8_t rx_data;
+typedef struct {
+	char *str;
+	int counter;
+	uint16_t large_value;
+} my_struct;
+
+int indx1 = 0;
+int indx2 = 0;
 
 /* USER CODE END 0 */
 
@@ -119,34 +127,30 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  /**************** Create Integer Queue ***********************/
+  /******** create QUEUE *********/
+  St_Queue_Handler = xQueueCreate(2, sizeof (my_struct));
 
-  SimpleQueue = xQueueCreate(5, sizeof (int));
-  if (SimpleQueue == 0) // Queue not created
+  if (St_Queue_Handler == 0)  // if there is some error while creating queue
   {
-	  char *str = "Unable to create Integer Queue\n\n";
-	  HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
+ 	 char *str = "Unable to create STRUCTURE Queue\n\n";
+ 	 HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
   }
   else
   {
-	  char *str = "Integer queue created successfully\n\n";
-	  HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
+	 char *str = "STRUCTURE Queue Created successfully\n\n";
+	 HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
   }
 
-  /**************** TASK RELATED ***********************/
+  /******** create QUEUE *********/
+  xTaskCreate(Sender1_Task, "Sender1", 128, NULL, 2, &Sender1_Task_Handler);
+  xTaskCreate(Sender2_Task, "Sender2", 128, NULL, 2, &Sender2_Task_Handler);
+  xTaskCreate(Receiver_Task, "RECEIVER", 128, NULL, 1, &Receiver_Task_Handler);
 
-  xTaskCreate(Sender_HPT_Task, "HPT_SEND", 128, NULL, 3, &Sender_HPT_Handler);
-  xTaskCreate(Sender_LPT_Task, "LPT_SEND", 128, (void *)111, 2, &Sender_LPT_Handler);
-
-  xTaskCreate(Receiver_Task, "Receive", 128, NULL, 1, &Receiver_Handler);
-
-  //HAL_UART_RxCpltCallback(&huart2);
-
-  HAL_UART_Receive_IT(&huart2, &rx_data, 1);
-
+  /******** start the scheduler *********/
   vTaskStartScheduler();
 
   /* USER CODE END 2 */
+
 
 
   /* We should never get here as control is now taken by the scheduler */
@@ -262,92 +266,100 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-void Sender_HPT_Task (void *argument)
+void Sender1_Task (void *argument)
 {
-	int i=222;
+	my_struct *ptrtostruct;
+
 	uint32_t TickDelay = pdMS_TO_TICKS(2000);
 	while (1)
 	{
-		char *str = "Entered SENDER_HPT Task\n about to SEND 222 to the queue\n\n";
+		char *str = "Entered SENDER1_Task\n about to SEND to the queue\n\n";
 		HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
 
-		if (xQueueSend(SimpleQueue, &i, portMAX_DELAY) == pdPASS)
+		/************ ALLOCATE MEMORY TO THE POINTER *****************/
+		ptrtostruct = pvPortMalloc(sizeof (my_struct));
+
+		/************ LOAD THE DATA ***********/
+		ptrtostruct->counter = 1+indx1;
+		ptrtostruct->large_value = 1000 + indx1*100;
+		ptrtostruct->str = "HELLO FROM SENDER 1 ";
+
+		/*********** send to the queue *******/
+		if (xQueueSend(St_Queue_Handler, &ptrtostruct, portMAX_DELAY) == pdPASS)
 		{
-			char *str2 = " Successfully sent the number 222 to the queue\nLeaving SENDER_HPT Task\n\n\n";
+			char *str2 = "Successfully sent to the queue\nLeaving SENDER1Task\n\n\n";
 			HAL_UART_Transmit(&huart2, (uint8_t *)str2, strlen (str2), HAL_MAX_DELAY);
 		}
+
+		indx1 = indx1+1;
+
 		vTaskDelay(TickDelay);
 	}
+
 }
 
-
-void Sender_LPT_Task (void *argument)
+void Sender2_Task (void *argument)
 {
-	int ToSend;
-	uint32_t TickDelay = pdMS_TO_TICKS(1000);
+	my_struct *ptrtostruct;
+
+	uint32_t TickDelay = pdMS_TO_TICKS(2000);
 	while (1)
 	{
-		ToSend = (int) argument;
-		char *str = "Entered SENDER_LPT Task\n about to SEND a number (111) to the queue\n\n";
+		char *str = "Entered SENDER2_Task\n about to SEND to the queue\n\n";
 		HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
 
-		xQueueSend(SimpleQueue, &ToSend, portMAX_DELAY);
+		/************ ALLOCATE MEMORY TO THE POINTER *****************/
+		ptrtostruct = pvPortMalloc(sizeof (my_struct));
 
-		char *str2 = " Successfully sent the number 111 to the queue\nLeaving SENDER_LPT Task\n\n\n";
-		HAL_UART_Transmit(&huart2, (uint8_t *)str2, strlen (str2), HAL_MAX_DELAY);
+		/************ LOAD THE DATA ***********/
+		ptrtostruct->str = "SENDER 2 says Hii!!!";
+		ptrtostruct->large_value = 2000 + 200*indx2;
+		ptrtostruct->counter = 1+indx1;
+
+		/*********** send to the queue *******/
+		if (xQueueSend(St_Queue_Handler, &ptrtostruct, portMAX_DELAY) == pdPASS)
+		{
+			char *str2 = "Successfully sent to the queue\nLeaving SENDER2Task\n\n\n";
+			HAL_UART_Transmit(&huart2, (uint8_t *)str2, strlen (str2), HAL_MAX_DELAY);
+		}
+
+		indx2 = indx2+1;
 
 		vTaskDelay(TickDelay);
 	}
+
 }
 
 void Receiver_Task (void *argument)
 {
-	int received=0;
-	uint32_t TickDelay = pdMS_TO_TICKS(5000);
+	my_struct *Rptrtostruct;
+	uint32_t TickDelay = pdMS_TO_TICKS(3000);
+	char *ptr;
+
 	while (1)
 	{
-		char str[100];
-		strcpy (str, "Entered RECEIVER Task\n about to RECEIVE a number from the queue\n\n");
+		char *str = "Entrered RECEIVER Task\n about to RECEIVE FROM the queue\n\n";
 		HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
 
-		if (xQueueReceive(SimpleQueue, &received, portMAX_DELAY) != pdTRUE)
+		if (xQueueReceive(St_Queue_Handler, &Rptrtostruct, portMAX_DELAY) == pdPASS)
 		{
-			HAL_UART_Transmit(&huart2, (uint8_t *)"Error in Receiving from Queue\n\n", 31, 1000);
+			ptr = pvPortMalloc(100 * sizeof (char)); // allocae memory for the string
+
+			sprintf (ptr, "Received from QUEUE:\n COUNTER = %d\n LARGE VALUE = %u\n STRING = %s\n\n\n",Rptrtostruct->counter,Rptrtostruct->large_value,Rptrtostruct->str);
+			HAL_UART_Transmit(&huart2,  (uint8_t *)ptr, strlen (ptr), HAL_MAX_DELAY);
+
+			vPortFree(ptr);
 		}
-		else
-		{
-			sprintf(str, " Successfully RECEIVED the number %d to the queue\nLeaving RECEIVER Task\n\n\n",received);
-			HAL_UART_Transmit(&huart2, (uint8_t *)str, strlen (str), HAL_MAX_DELAY);
-		}
+
+
+		vPortFree(Rptrtostruct);
+
 		vTaskDelay(TickDelay);
 	}
 }
 
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-	HAL_UART_Receive_IT(huart, &rx_data, 1);
-	int ToSend = 123456789;
-	if (rx_data == 'r')
-	{
-		/* The xHigherPriorityTaskWoken parameter must be initialized to pdFALSE as
-		it will get set to pdTRUE inside the interrupt safe API function if a
-		context switch is required. */
-		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-		if (xQueueSendToFrontFromISR(SimpleQueue, &ToSend, &xHigherPriorityTaskWoken) == pdPASS)
-		{
-			HAL_UART_Transmit(huart, (uint8_t *)"\n\nSent from ISR\n\n", 17, 500);
-		}
-		/* Pass the xHigherPriorityTaskWoken value into portEND_SWITCHING_ISR(). If
-		xHigherPriorityTaskWoken was set to pdTRUE inside xSemaphoreGiveFromISR()
-		then calling portEND_SWITCHING_ISR() will request a context switch. If
-		xHigherPriorityTaskWoken is still pdFALSE then calling
-		portEND_SWITCHING_ISR() will have no effect */
-		portEND_SWITCHING_ISR(xHigherPriorityTaskWoken);
-	}
-}
-
 /* USER CODE END 4 */
+
 
 /**
   * @brief  Period elapsed callback in non blocking mode
